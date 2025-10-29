@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Broadcaster</title>
+<style>
+html, body { margin:0; padding:0; height:100%; background:#111; color:#ddd; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial; }
+video { width:100%; height:100%; object-fit:contain; }
+button { position:absolute; top:10px; left:10px; padding:10px 15px; font-size:16px; }
+</style>
+</head>
+<body>
+<video id="local" autoplay playsinline muted></video>
+<button id="start">Start Sharing</button>
+<script>
+const signaling = new WebSocket('wss://remotepc.caleb-martinez.workers.dev/');
+let pc;
+let localStream;
+let agentSocket;
+
+signaling.addEventListener('message', async ev=>{
+  const m = JSON.parse(ev.data);
+  if(m.type === 'answer'){ await pc.setRemoteDescription(new RTCSessionDescription(m.answer)); }
+  if(m.type === 'ice'){ await pc.addIceCandidate(new RTCIceCandidate(m.candidate)); }
+});
+
+document.getElementById('start').onclick = async ()=>{
+  localStream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+  document.getElementById('local').srcObject = localStream;
+  
+  pc = new RTCPeerConnection();
+  localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+  
+  pc.onicecandidate = e => {
+    if(e.candidate) signaling.send(JSON.stringify({to:'viewer', type:'ice', candidate:e.candidate}));
+  };
+  
+  pc.ondatachannel = ev => {
+    const chan = ev.channel;
+    chan.onmessage = msg => {
+      try {
+        if(!agentSocket || agentSocket.readyState !== WebSocket.OPEN){
+          agentSocket = new WebSocket('ws://localhost:4000');
+          agentSocket.onopen = ()=> agentSocket.send(msg.data);
+        } else {
+          agentSocket.send(msg.data);
+        }
+      } catch(e){}
+    };
+  };
+  
+  signaling.send(JSON.stringify({type:'register', role:'broadcaster'}));
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  signaling.send(JSON.stringify({to:'viewer', type:'offer', offer:offer}));
+};
+</script>
+</body>
+</html>
