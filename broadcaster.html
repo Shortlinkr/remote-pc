@@ -1,59 +1,117 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta charset="utf-8">
 <title>Broadcaster</title>
 <style>
-html, body { margin:0; padding:0; height:100%; background:#111; color:#ddd; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial; }
-video { width:100%; height:100%; object-fit:contain; }
-button { position:absolute; top:10px; left:10px; padding:10px 15px; font-size:16px; }
+html,body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #111;
+  color: #ddd;
+  font-family: system-ui, sans-serif;
+}
+video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+button {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 10px 15px;
+  font-size: 16px;
+  background: #333;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#log {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-height: 40%;
+  overflow-y: auto;
+  background: rgba(0,0,0,0.7);
+  font-size: 12px;
+  padding: 6px;
+  box-sizing: border-box;
+}
 </style>
 </head>
 <body>
 <video id="local" autoplay playsinline muted></video>
 <button id="start">Start Sharing</button>
+<pre id="log"></pre>
+
 <script>
+function log(...args) {
+  console.log(...args);
+  const el = document.getElementById('log');
+  el.textContent += args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ') + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
 const signaling = new WebSocket('wss://remotepc.caleb-martinez.workers.dev/');
 let pc;
 let localStream;
-let agentSocket;
 
-signaling.addEventListener('message', async ev=>{
+signaling.onopen = () => {
+  log("Broadcaster: connected to signaling");
+  signaling.send(JSON.stringify({ type: "register", role: "broadcaster" }));
+};
+
+signaling.onmessage = async ev => {
   const m = JSON.parse(ev.data);
-  if(m.type === 'answer'){ await pc.setRemoteDescription(new RTCSessionDescription(m.answer)); }
-  if(m.type === 'ice'){ await pc.addIceCandidate(new RTCIceCandidate(m.candidate)); }
-});
+  log("Broadcaster got message:", m);
 
-document.getElementById('start').onclick = async ()=>{
-  localStream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
-  document.getElementById('local').srcObject = localStream;
-  
-  pc = new RTCPeerConnection();
-  localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
-  
-  pc.onicecandidate = e => {
-    if(e.candidate) signaling.send(JSON.stringify({to:'viewer', type:'ice', candidate:e.candidate}));
-  };
-  
-  pc.ondatachannel = ev => {
-    const chan = ev.channel;
-    chan.onmessage = msg => {
-      try {
-        if(!agentSocket || agentSocket.readyState !== WebSocket.OPEN){
-          agentSocket = new WebSocket('ws://localhost:4000');
-          agentSocket.onopen = ()=> agentSocket.send(msg.data);
-        } else {
-          agentSocket.send(msg.data);
-        }
-      } catch(e){}
+  if (m.type === "answer") {
+    await pc.setRemoteDescription(new RTCSessionDescription(m.answer));
+    log("Remote description set from viewer answer.");
+  }
+
+  if (m.type === "ice") {
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(m.candidate));
+      log("Added ICE candidate from viewer.");
+    } catch (err) {
+      log("Failed to add ICE candidate:", err);
+    }
+  }
+};
+
+document.getElementById('start').onclick = async () => {
+  try {
+    localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    document.getElementById('local').srcObject = localStream;
+
+    pc = new RTCPeerConnection();
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+    pc.onicecandidate = e => {
+      if (e.candidate) {
+        signaling.send(JSON.stringify({ to: "viewer", type: "ice", candidate: e.candidate }));
+        log("Sent ICE candidate to viewer.");
+      }
     };
-  };
-  
-  signaling.send(JSON.stringify({type:'register', role:'broadcaster'}));
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  signaling.send(JSON.stringify({to:'viewer', type:'offer', offer:offer}));
+
+    pc.onconnectionstatechange = () => {
+      log("Connection state:", pc.connectionState);
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    log("Created and set local offer.");
+    signaling.send(JSON.stringify({ to: "viewer", type: "offer", offer: offer }));
+    log("Sent offer to viewer.");
+  } catch (err) {
+    log("Error starting share:", err);
+  }
 };
 </script>
 </body>
