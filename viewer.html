@@ -1,8 +1,21 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Viewer</title>
+<style>
+html,body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #000;
+}
+video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+</style>
 </head>
 <body>
 <video id="remote" autoplay playsinline controls></video>
@@ -35,34 +48,6 @@ pc.ontrack = e => {
 signaling.onopen = () => {
   signaling.send(JSON.stringify({type:'register', role:'viewer'}));
 };
-</script>
-</body>
-</html>
-  }
-  if(m.type === 'ice'){ await pc.addIceCandidate(new RTCIceCandidate(m.candidate)); }
-});
-
-const overlay = document.getElementById('overlay');
-overlay.focus();
-
-overlay.addEventListener('pointerdown', e => sendPointer('down', e));
-overlay.addEventListener('pointerup', e => sendPointer('up', e));
-overlay.addEventListener('pointermove', e => sendPointer('move', e));
-overlay.addEventListener('wheel', e => {
-  if(dc && dc.readyState==='open') dc.send(JSON.stringify({type:'wheel', deltaX:e.deltaX, deltaY:e.deltaY}));
-  e.preventDefault();
-});
-
-window.addEventListener('keydown', e => { if(dc && dc.readyState==='open') dc.send(JSON.stringify({type:'key', k:e.key, code:e.code, down:true})); });
-window.addEventListener('keyup', e => { if(dc && dc.readyState==='open') dc.send(JSON.stringify({type:'key', k:e.key, code:e.code, down:false})); });
-
-function sendPointer(action, e){
-  if(!dc || dc.readyState !== 'open') return;
-  const rect = document.getElementById('remote').getBoundingClientRect();
-  const x = (e.clientX - rect.left) / rect.width;
-  const y = (e.clientY - rect.top) / rect.height;
-  dc.send(JSON.stringify({type:'mouse', action, x, y, button:e.button}));
-}
 </script>
 </body>
 </html>
