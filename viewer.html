@@ -1,39 +1,43 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta charset="utf-8">
 <title>Viewer</title>
-<style>
-html, body { margin:0; padding:0; height:100%; background:#000; color:#fff; font-family:system-ui; }
-#remote { width:100%; height:100%; object-fit:contain; background:#222; }
-#overlay { position:absolute; top:0; left:0; right:0; bottom:0; }
-</style>
 </head>
 <body>
-<video id="remote" autoplay playsinline></video>
-<div id="overlay" tabindex="0"></div>
+<video id="remote" autoplay playsinline controls></video>
 <script>
 const signaling = new WebSocket('wss://remotepc.caleb-martinez.workers.dev/');
-let pc;
-let dc;
+let pc = new RTCPeerConnection();
 
-signaling.addEventListener('open', ()=> signaling.send(JSON.stringify({type:'register', role:'viewer'})));
-signaling.addEventListener('message', async ev=>{
+signaling.onmessage = async ev => {
   const m = JSON.parse(ev.data);
-  if(m.type === 'offer'){
-    pc = new RTCPeerConnection();
-    pc.ontrack = e => document.getElementById('remote').srcObject = e.streams[0];
-    pc.onicecandidate = e => { if(e.candidate) signaling.send(JSON.stringify({to:'broadcaster', type:'ice', candidate:e.candidate})); };
-    
-    dc = pc.createDataChannel('control');
-    dc.onopen = ()=>console.log('control channel open');
-    dc.onclose = ()=>console.log('control channel closed');
-    
+  if (m.type === 'offer') {
     await pc.setRemoteDescription(new RTCSessionDescription(m.offer));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     signaling.send(JSON.stringify({to:'broadcaster', type:'answer', answer:answer}));
+  }
+  if (m.type === 'ice') {
+    await pc.addIceCandidate(new RTCIceCandidate(m.candidate));
+  }
+};
+
+pc.onicecandidate = e => {
+  if (e.candidate)
+    signaling.send(JSON.stringify({to:'broadcaster', type:'ice', candidate:e.candidate}));
+};
+
+pc.ontrack = e => {
+  document.getElementById('remote').srcObject = e.streams[0];
+};
+
+signaling.onopen = () => {
+  signaling.send(JSON.stringify({type:'register', role:'viewer'}));
+};
+</script>
+</body>
+</html>
   }
   if(m.type === 'ice'){ await pc.addIceCandidate(new RTCIceCandidate(m.candidate)); }
 });
