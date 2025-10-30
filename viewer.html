@@ -9,44 +9,86 @@ html,body {
   padding: 0;
   height: 100%;
   background: #000;
+  color: #ddd;
+  font-family: system-ui, sans-serif;
 }
 video {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  background: #111;
+}
+#log {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-height: 40%;
+  overflow-y: auto;
+  background: rgba(0,0,0,0.7);
+  font-size: 12px;
+  padding: 6px;
+  box-sizing: border-box;
 }
 </style>
 </head>
 <body>
 <video id="remote" autoplay playsinline controls></video>
+<pre id="log"></pre>
+
 <script>
+function log(...args) {
+  console.log(...args);
+  const el = document.getElementById('log');
+  el.textContent += args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ') + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
 const signaling = new WebSocket('wss://remotepc.caleb-martinez.workers.dev/');
 let pc = new RTCPeerConnection();
 
+signaling.onopen = () => {
+  log("Viewer: connected to signaling");
+  signaling.send(JSON.stringify({ type: "register", role: "viewer" }));
+};
+
 signaling.onmessage = async ev => {
   const m = JSON.parse(ev.data);
-  if (m.type === 'offer') {
+  log("Viewer got message:", m);
+
+  if (m.type === "offer") {
+    log("Got offer, creating answer...");
     await pc.setRemoteDescription(new RTCSessionDescription(m.offer));
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    signaling.send(JSON.stringify({to:'broadcaster', type:'answer', answer:answer}));
+    signaling.send(JSON.stringify({ to: "broadcaster", type: "answer", answer: answer }));
+    log("Sent answer to broadcaster.");
   }
-  if (m.type === 'ice') {
-    await pc.addIceCandidate(new RTCIceCandidate(m.candidate));
+
+  if (m.type === "ice") {
+    log("Got ICE candidate from broadcaster.");
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(m.candidate));
+    } catch (err) {
+      log("Failed to add ICE candidate:", err);
+    }
   }
 };
 
 pc.onicecandidate = e => {
-  if (e.candidate)
-    signaling.send(JSON.stringify({to:'broadcaster', type:'ice', candidate:e.candidate}));
+  if (e.candidate) {
+    signaling.send(JSON.stringify({ to: "broadcaster", type: "ice", candidate: e.candidate }));
+    log("Sent ICE candidate to broadcaster.");
+  }
+};
+
+pc.onconnectionstatechange = () => {
+  log("Connection state:", pc.connectionState);
 };
 
 pc.ontrack = e => {
+  log("Track received!");
   document.getElementById('remote').srcObject = e.streams[0];
-};
-
-signaling.onopen = () => {
-  signaling.send(JSON.stringify({type:'register', role:'viewer'}));
 };
 </script>
 </body>
